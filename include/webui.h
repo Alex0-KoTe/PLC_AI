@@ -1,0 +1,25 @@
+#pragma once
+#include <Arduino.h>
+void page();
+void hStatus();
+void setPage();
+void hCh();
+void hRamp();
+void hDelta();
+void hAlClr();
+void chmapPage();
+void hChmapSave();
+void hChmapReset();
+void netPage();
+void hNetSave();
+void ntpPage();
+void hNtpSave();
+void hTimeSave();
+void hNtpForce();
+void graphPage();
+void hArchDays();
+void hArchDay();
+void hFsInfo();
+void hEn();
+// [FIX] Добавлено объявление
+void checkRestart();
