@@ -55,6 +55,7 @@ WebServer server(80);
 //================ FREERTOS ================
 TaskHandle_t webTaskHandle = NULL;
 SemaphoreHandle_t fsMutex = NULL;
+SemaphoreHandle_t stateMutex = NULL;
 
 //================ УТИЛИТЫ ================
 float unpackF(uint16_t hi, uint16_t lo) {

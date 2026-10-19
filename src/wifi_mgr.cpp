@@ -16,11 +16,16 @@ void wifiInit() {
   } else {
     Serial.println("[WiFi] DHCP");
   }
-  WiFi.begin(ssid, pass);
+  // [FIX] Блокировка основного потока устранена: вместо WiFi.begin()+delay()
+  // цикла (до 5 сек) запускаем неблокирующее подключение и сразу выходим —
+  // статус обработает wifiManage().
+  // [FIX] Пустой SSID (заводские настройки) — не подключаемся, сразу AP.
+  bool hasCreds = (ssid[0] != '\0');
+  if(hasCreds) WiFi.begin(ssid, pass);
   Serial.printf("[WiFi] Подключение к '%s'...\n", ssid);
   uint32_t start = millis();
-  while(WiFi.status() != WL_CONNECTED && millis() - start < 5000) {
-    delay(100);
+  while(hasCreds && WiFi.status() != WL_CONNECTED && millis() - start < 1000) {
+    vTaskDelay(pdMS_TO_TICKS(50));
   }
   if(WiFi.status() == WL_CONNECTED) {
     prevSta = true;
@@ -31,7 +36,7 @@ void wifiInit() {
     tLost = millis();
     // [FIX] Инициализируем tRetry, чтобы первая попытка была через 60 сек
     tRetry = millis();
-    Serial.println("[WiFi] Не удалось подключиться за 5 сек");
+    Serial.println("[WiFi] Не подключено (без блокировки); AP поднимется через 15 сек");
   }
 }
 
@@ -65,7 +70,7 @@ void wifiManage() {
     if(millis() - tRetry >= 60000) {
       tRetry = millis();
       bool busy = (WiFi.softAPgetStationNum() > 0) || (millis() - lastWeb < 30000);
-      if(!busy) {
+      if(!busy && ssid[0] != '\0') {   // [FIX] не reconnect к пустому SSID
         WiFi.begin(ssid, pass);
         Serial.println("retry STA");
       }

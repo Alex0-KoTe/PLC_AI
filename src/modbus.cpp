@@ -4,6 +4,8 @@
 #include "ramp.h"
 #include "protection.h"
 
+static bool setHoldRegLocked(uint16_t i, uint16_t v);
+
 uint16_t getHoldReg(uint16_t i) {
   if(i == 0) {
     uint16_t w = blinkBit ? 1 : 0;
@@ -15,6 +17,7 @@ uint16_t getHoldReg(uint16_t i) {
   }
   if(i <= 12) {
     int ch = (i - 1) / 2;
+    // [FIX] Уставка/рампа привязаны к каналу, маппинг датчика здесь не применяется
     uint16_t hi, lo;
     packF(sp[ch], &hi, &lo);
     return ((i - 1) & 1) ? lo : hi;
@@ -54,6 +57,14 @@ uint16_t getHoldReg(uint16_t i) {
 }
 
 bool setHoldReg(uint16_t i, uint16_t v) {
+  // [FIX] Все изменения общих данных каналов — под stateMutex (Core 1 их читает в controlTick)
+  if(!stateMutex || xSemaphoreTake(stateMutex, pdMS_TO_TICKS(100)) != pdTRUE) return false;
+  bool res = setHoldRegLocked(i, v);
+  xSemaphoreGive(stateMutex);
+  return res;
+}
+
+static bool setHoldRegLocked(uint16_t i, uint16_t v) {
   if(i == 0) {
     // Маска 0x1554 = 0001 0101 0101 0100 — биты 2,4,6,8,10,12 (разрешения en[])
     uint16_t nv = (getHoldReg(0) & ~0x1554) | (v & 0x1554);
@@ -85,8 +96,12 @@ bool setHoldReg(uint16_t i, uint16_t v) {
     if(rampH[ch] <= 0) workSp[ch] = nf;
     
     logEv(EV_SP, ch + 1, String(nf, 1));
-    if(rampLeft[ch] > 0 && !rampInit[ch] && ok[ch])
-      step[ch] = (temp[ch] - sp[ch]) / ((float)rampLeft[ch] * 60.0f);
+    // [FIX] Шаг рампы пересчитывается по температуре ПРИВЯЗАННОГО датчика
+    // (sensorMap), а не по temp[ch] — иначе при нестандартном маппинге
+    // рампа считалась по данным чужого датчика.
+    int sm = sensorMap[ch];
+    if(rampLeft[ch] > 0 && !rampInit[ch] && ok[sm])
+      step[ch] = (temp[sm] - sp[ch]) / ((float)rampLeft[ch] * 60.0f);
     eeDirty = true;
     lastChangeTime = millis();
     return true;

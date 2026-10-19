@@ -21,13 +21,13 @@ void protectionTick() {
         if(!err2[k]) {
           err2[k] = true;
           errSince[k] = millis();   // фиксируем время появления
-          logEv(EV_ERR2, k, String(T, 2));
+          logEv(EV_ERR2, k + 1, String(T, 2));  // [FIX] 1-based
         }
       } else if(T <= sp[k]) {
         if(err2[k]) {
           err2[k] = false;
           errSince[k] = 0;
-          logEv(EV_ERRCLR, k, "нагрев сброшен");
+          logEv(EV_ERRCLR, k + 1, "нагрев сброшен");  // [FIX] 1-based
         }
       }
     }
@@ -37,13 +37,13 @@ void protectionTick() {
       if(!err3[k]) {
         err3[k] = true;
         errSince[k] = millis();   // фиксируем время появления
-        logEv(EV_ERR3, k, String(T, 2));
+        logEv(EV_ERR3, k + 1, String(T, 2));  // [FIX] 1-based
       }
     } else {
       if(err3[k]) {
         err3[k] = false;
         errSince[k] = 0;
-        logEv(EV_ERRCLR, k, "переохл. сброшено");
+        logEv(EV_ERRCLR, k + 1, "переохл. сброшено");  // [FIX] 1-based
       }
     }
     
@@ -54,7 +54,7 @@ void protectionTick() {
         if(!err1[k]) {
           err1[k] = true;
           errSince[k] = millis();   // фиксируем время появления
-          logEv(EV_ERR1, k, String(T, 2));
+          logEv(EV_ERR1, k + 1, String(T, 2));  // [FIX] 1-based
         }
       }
     } else {
@@ -63,7 +63,7 @@ void protectionTick() {
         if(err1[k]) {
           err1[k] = false;
           errSince[k] = 0;
-          logEv(EV_ERRCLR, k, "нет охл. сброшено");
+          logEv(EV_ERRCLR, k + 1, "нет охл. сброшено");  // [FIX] 1-based
         }
       }
     }
@@ -71,9 +71,9 @@ void protectionTick() {
     // ---- Автосброс ошибок через 1 час ----
     if((err1[k] || err2[k] || err3[k]) && errSince[k] > 0) {
       if(millis() - errSince[k] >= ERR_AUTO_RESET_MS) {
-        if(err1[k]) logEv(EV_ERRCLR, k, "нет охл. автосброс (1ч)");
-        if(err2[k]) logEv(EV_ERRCLR, k, "нагрев автосброс (1ч)");
-        if(err3[k]) logEv(EV_ERRCLR, k, "переохл. автосброс (1ч)");
+        if(err1[k]) logEv(EV_ERRCLR, k + 1, "нет охл. автосброс (1ч)");  // [FIX] 1-based
+        if(err2[k]) logEv(EV_ERRCLR, k + 1, "нагрев автосброс (1ч)");  // [FIX] 1-based
+        if(err3[k]) logEv(EV_ERRCLR, k + 1, "переохл. автосброс (1ч)");  // [FIX] 1-based
         err1[k] = false;
         err2[k] = false;
         err3[k] = false;
@@ -90,7 +90,7 @@ void clearAlarm(int k) {
   err3[k] = false;
   errSince[k] = 0;
   coolTimer[k] = 0;
-  logEv(EV_ERRCLR, k, "ручной сброс");
+  logEv(EV_ERRCLR, k + 1, "ручной сброс");  // [FIX] 1-based
 }
 
 void clearAlarms() {

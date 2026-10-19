@@ -5,6 +5,7 @@
 #define FACTORY   34
 //================ КОНСТАНТЫ РЕГУЛИРОВАНИЯ ================
 #define HYST      0.1f
+#define REL_MIN_ON_MS 60000UL  // [FIX] мин. время между переключениями одного клапана (антидребезг)
 #define DEF_SP    10.0f
 #define DEF_DELTA 0.5f
 #define HOUR_MS   3600000UL
@@ -12,8 +13,10 @@
 #define HEAT_DELAY_MS  900000UL   // 15 мин: задержка активации защиты "нагрев" после включения клапана
 #define ERR_AUTO_RESET_MS  3600000UL   // 1 час: автосброс ошибок
 //================ СЕТЬ ================
-#define DEF_SSID  "ZyXEL"
-#define DEF_PASS  "DYNFF39666"
+// [FIX] Убран зашитый чужой WiFi-пароль: устройство подключается только
+// к сети, настроенной пользователем (веб/AP UsKoTE-AP -> /net).
+#define DEF_SSID  ""
+#define DEF_PASS  ""
 #define AP_SSID   "UsKoTE-AP"
 #define AP_PASS   "12345678"
 //================ MODBUS ================

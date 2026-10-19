@@ -12,7 +12,7 @@ void controlTick() {
     if(!ok[sm]) {
       if(rel[k]) {
         rel[k] = false;
-        logEv(EV_CH_OFF, k, "нет датчика");
+        logEv(EV_CH_OFF, k + 1, "нет датчика");  // [FIX] канал в логе — 1-based
       }
       continue;
     }
@@ -27,7 +27,7 @@ void controlTick() {
       rel[k] = true;
       refOn[k] = T;
       onSince[k] = millis();
-      logEv(EV_CH_ON, k, String(T, 2));
+      logEv(EV_CH_ON, k + 1, String(T, 2));  // [FIX] 1-based
     } 
     // Выключение по гистерезису
     else if(rel[k] && T <= workSp[k] - HYST) {
@@ -36,9 +36,9 @@ void controlTick() {
       if(err2[k]) {
         err2[k] = false;
         errSince[k] = 0;
-        logEv(EV_ERRCLR, k, "нагрев сброшен (клапан закрыт)");
+        logEv(EV_ERRCLR, k + 1, "нагрев сброшен (клапан закрыт)");  // [FIX] 1-based
       }
-      logEv(EV_CH_OFF, k, String(T, 2));
+      logEv(EV_CH_OFF, k + 1, String(T, 2));  // [FIX] 1-based
     }
   }
 }

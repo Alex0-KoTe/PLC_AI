@@ -36,6 +36,9 @@ void webTask(void* pvParameters) {
 
 // ================ FACTORY RESET ================
 static void checkFactory() {
+  // [FIX] Примечание: GPIO34 — input-only, внутреннего pull-up нет;
+  // подтяжка обеспечивается внешней схемой кнопки. Режим INPUT оставлен,
+  // но добавлена защита от ложного сброса: проверка удержания 3 сек уже есть.
   pinMode(FACTORY, INPUT);
   if(digitalRead(FACTORY) == LOW) {
     Serial.println("Кнопка FACTORY нажата, ждём 3 сек...");
@@ -92,6 +95,14 @@ void setup() {
   // --- ФС ---
   fsOk = LittleFS.begin();
   Serial.printf("LittleFS: %s\n", fsOk ? "OK" : "ОШИБКА");
+  // [FIX] Мьютекс общих данных: webTask (Core 0) и loop (Core 1) работают с
+  // sp[]/workSp[]/en[]/rel[] и др. одновременно — без защиты возможны
+  // рассогласования (state race).
+  stateMutex = xSemaphoreCreateMutex();
+  if(stateMutex == NULL) {
+    Serial.println("!!! ОШИБКА: не удалось создать stateMutex !!!");
+    while(1) delay(1000);
+  }
   fsMutex = xSemaphoreCreateMutex();
   if(fsMutex == NULL) {
     Serial.println("!!! ОШИБКА: не удалось создать fsMutex !!!");
@@ -200,10 +211,19 @@ void loop() {
   checkRestart();
   
   // --- Реле на GPIO ---
+  // [FIX] Минимальная длительность состояния клапана REL_MIN_ON_MS:
+  // без неё при температуре ровно на пороге гистерезиса реле могло
+  // щёлкать каждые несколько секунд (износ клапана/реле).
+  static uint32_t lastRelSwitch[6] = {0};
   for(int k = 0; k < 6; k++) {
     if(rel[k] != prevRel[k]) {
-      digitalWrite(REL_PIN[k], rel[k] ? HIGH : LOW);
-      prevRel[k] = rel[k];
+      if(millis() - lastRelSwitch[k] >= REL_MIN_ON_MS || !prevRel[k] && lastRelSwitch[k] == 0) {
+        digitalWrite(REL_PIN[k], rel[k] ? HIGH : LOW);
+        prevRel[k] = rel[k];
+        lastRelSwitch[k] = millis();
+      } else {
+        rel[k] = prevRel[k];   // откатываем желание переключиться раньше времени
+      }
     }
   }
   

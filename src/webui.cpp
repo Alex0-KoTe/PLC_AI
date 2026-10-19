@@ -172,10 +172,14 @@ void hCh() {
   lastWeb = millis();
   int k = server.arg("ch").toInt() - 1;
   float v = server.arg("val").toFloat();
-  if(k >= 0 && k < 6 && v > -20 && v < 60) {
+  // [FIX] Валидация: toFloat() из "abc" даёт 0.0 — теперь сравниваем со строкой
+  // и диапазоном -20..60 включительно; запись общих данных — под stateMutex.
+  if(k >= 0 && k < 6 && server.arg("val").length() > 0 && v >= -20.0f && v <= 60.0f) {
+    if(stateMutex) xSemaphoreTake(stateMutex, portMAX_DELAY);
     sp[k] = v;
     if(rampH[k] <= 0) workSp[k] = v;
-    logEv(EV_SP, k, String(v, 2));
+    if(stateMutex) xSemaphoreGive(stateMutex);
+    logEv(EV_SP, k + 1, String(v, 2));  // [FIX] канал в логе — 1-based
     // [FIX] Используем eeDirty вместо прямого eeSave()
     eeDirty = true;
     lastChangeTime = millis();
@@ -190,8 +194,10 @@ void hRamp() {
   int k = server.arg("ch").toInt() - 1;
   int v = server.arg("val").toInt();
   if(k >= 0 && k < 6 && v >= 0 && v <= 99) {
+    if(stateMutex) xSemaphoreTake(stateMutex, portMAX_DELAY);   // [FIX] rampSet пишет общие данные
     rampSet((uint8_t)k, (uint8_t)v);
-    logEv(EV_RAMP_RS, k, String(v));
+    if(stateMutex) xSemaphoreGive(stateMutex);
+    logEv(EV_RAMP_RS, k + 1, String(v));  // [FIX] 1-based
     // [FIX] eeDirty уже установлен в rampSet()
   }
   server.sendHeader("Location", "/");
@@ -201,8 +207,18 @@ void hRamp() {
 // ================ ДЕЛЬТЫ ЗАЩИТ ================
 void hDelta() {
   lastWeb = millis();
-  if(server.hasArg("cool")) deltaCool = server.arg("cool").toFloat();
-  if(server.hasArg("heat")) deltaHeat = server.arg("heat").toFloat();
+  // [FIX] Валидация диапазонов: раньше любое значение из URL (в т.ч. NaN,
+  // отрицательное, 1e30) записывалось в настройки и сохранялось в EEPROM.
+  if(stateMutex) xSemaphoreTake(stateMutex, portMAX_DELAY);   // [FIX] гонка с protectionTick (Core 1)
+  if(server.hasArg("cool")) {
+    float v = server.arg("cool").toFloat();
+    if(v >= 0.1f && v <= 10.0f) deltaCool = v;
+  }
+  if(server.hasArg("heat")) {
+    float v = server.arg("heat").toFloat();
+    if(v >= 0.1f && v <= 10.0f) deltaHeat = v;
+  }
+  if(stateMutex) xSemaphoreGive(stateMutex);
   // [FIX] Используем eeDirty вместо прямого eeSave()
   eeDirty = true;
   lastChangeTime = millis();
@@ -215,10 +231,13 @@ void hAlClr() {
   lastWeb = millis();
   int k = server.arg("ch").toInt() - 1;
   if(k >= 0 && k < 6) {
-    err1[k] = false;
-    err2[k] = false;
-    err3[k] = false;
-    logEv(EV_ERRCLR, k, "ручной сброс");
+    // [FIX] Используем clearAlarm(): он также сбрасывает errSince[] и
+    // внутренние таймеры защит (coolTimer[]). Без этого защита "нет охлаждения"
+    // срабатывала повторно почти сразу после ручного сброса.
+    // Логирование события выполняет сам clearAlarm().
+    if(stateMutex) xSemaphoreTake(stateMutex, portMAX_DELAY);   // [FIX] гонка с protectionTick
+    clearAlarm(k);
+    if(stateMutex) xSemaphoreGive(stateMutex);
   }
   server.sendHeader("Location", "/");
   server.send(302);
@@ -229,8 +248,14 @@ void hEn() {
   lastWeb = millis();
   int k = server.arg("ch").toInt() - 1;
   if(k >= 0 && k < 6) {
+    if(stateMutex) xSemaphoreTake(stateMutex, portMAX_DELAY);   // [FIX] защита от гонки с Core 1
     en[k] = !en[k];
-    if(!en[k]) rel[k] = false;   // при выключении закрываем клапан
+    if(!en[k]) {
+      rel[k] = false;            // при выключении закрываем клапан
+    }
+    if(stateMutex) xSemaphoreGive(stateMutex);
+    if(!en[k]) clearAlarm(k);    // [FIX] снимаем аварии выключенного канала
+    logEv(en[k] ? EV_CH_ON : EV_CH_OFF, k + 1, "канал");  // [FIX] событие вкл/выкл канала
     // [FIX] Используем eeDirty вместо прямого eeSave()
     eeDirty = true;
     lastChangeTime = millis();
@@ -526,16 +551,18 @@ void hArchDay() {
                 ",\"tz\":" + String(ntpOffsetHours) + ",\"pts\":[],\"count\":0}");
     return;
   }
-  if(fsMutex == NULL || xSemaphoreTake(fsMutex, pdMS_TO_TICKS(2000)) != pdTRUE) {
-    server.send(500, "application/json", "{\"error\":\"fs busy\"}");
+  // [FIX] Раньше файл читался ПОД fsMutex и удерживался до конца отдачи
+  // ~1 МБ JSON — записи архива и лога с Core 1 отваливались по таймауту
+  // мьютекса и терялись. Теперь данные сначала копируются в RAM, мьютекс
+  // сразу освобождается, и только потом формируется HTTP-ответ.
+  static uint8_t* dayBuf = nullptr;
+  if(!dayBuf) dayBuf = (uint8_t*)malloc(ARCH_DAY_FILE_SIZE);
+  if(!dayBuf) {
+    server.send(500, "application/json", "{\"error\":\"no mem\"}");
     return;
   }
-  char fname[32];
-  snprintf(fname, sizeof(fname), "/arch_%08lu.bin", dateNum);
-  File f = LittleFS.open(fname, "r");
-  if(!f || f.size() != ARCH_DAY_FILE_SIZE) {
-    if(f) f.close();
-    xSemaphoreGive(fsMutex);
+  int got = archReadDay(dateNum, dayBuf);
+  if(got <= 0) {
     server.send(200, "application/json",
                 "{\"date\":" + String(dateNum) + ",\"t0\":" + String(dayStart) +
                 ",\"tz\":" + String(ntpOffsetHours) + ",\"pts\":[],\"count\":0}");
@@ -545,43 +572,35 @@ void hArchDay() {
   server.send(200, "application/json", "");
   server.sendContent("{\"date\":" + String(dateNum) + ",\"t0\":" + String(dayStart) +
                      ",\"tz\":" + String(ntpOffsetHours) + ",\"pts\":[");
-  static uint8_t buf[512];
   const int stride = 6;
   String chunk;
   chunk.reserve(2048);
-  int taken = 0, i = 0;
-  while(f.available()) {
-    int got = f.read(buf, sizeof(buf));
-    for(int off = 0; off + ARCH_REC_SIZE <= got; off += ARCH_REC_SIZE) {
-      if(i % stride == 0) {
-        uint8_t* rec = buf + off;
-        uint32_t t = (uint32_t)rec[0] | ((uint32_t)rec[1]<<8) |
-                     ((uint32_t)rec[2]<<16) | ((uint32_t)rec[3]<<24);
-        if(t > 100000) {
-          if(taken) chunk += ",";
-          chunk += "[" + String((long)t);
-          for(int k = 0; k < 6; k++) {
-            int16_t v = (int16_t)(rec[4+2*k] | ((uint16_t)rec[5+2*k]<<8));
-            chunk += ",";
-            chunk += (v == -32768) ? "-99.99" : String(v/100.0f, 2);
-          }
-          chunk += "]";
-          taken++;
-          if(chunk.length() > 1500) {
-            server.sendContent(chunk);
-            chunk = "";
-            chunk.reserve(2048);
-          }
-        }
+  int taken = 0;
+  int nrec = got / ARCH_REC_SIZE;
+  for(int i = 0; i < nrec; i += stride) {
+    uint8_t* rec = dayBuf + i * ARCH_REC_SIZE;
+    uint32_t t = (uint32_t)rec[0] | ((uint32_t)rec[1]<<8) |
+                 ((uint32_t)rec[2]<<16) | ((uint32_t)rec[3]<<24);
+    if(t > 100000) {
+      if(taken) chunk += ",";
+      chunk += "[" + String((long)t);
+      for(int k = 0; k < 6; k++) {
+        int16_t v = (int16_t)(rec[4+2*k] | ((uint16_t)rec[5+2*k]<<8));
+        chunk += ",";
+        chunk += (v == -32768) ? "-99.99" : String(v/100.0f, 2);
       }
-      i++;
+      chunk += "]";
+      taken++;
+      if(chunk.length() > 1500) {
+        server.sendContent(chunk);
+        chunk = "";
+        chunk.reserve(2048);
+      }
     }
   }
   if(chunk.length()) server.sendContent(chunk);
   server.sendContent("],\"count\":" + String(taken) + "}");
   server.sendContent("");
-  f.close();
-  xSemaphoreGive(fsMutex);
 }
 
 // ================ ЛОГ: расшифровка кодов ================

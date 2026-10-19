@@ -71,6 +71,8 @@ extern WebServer server;
 //================ FREERTOS ================
 extern TaskHandle_t webTaskHandle;
 extern SemaphoreHandle_t fsMutex;
+// [FIX] Мьютекс общих данных каналов (Core 0 web/modbus vs Core 1 control)
+extern SemaphoreHandle_t stateMutex;
 
 //================ УТИЛИТЫ ================
 float unpackF(uint16_t hi, uint16_t lo);
