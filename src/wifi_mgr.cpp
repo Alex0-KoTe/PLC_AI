@@ -4,12 +4,59 @@
 #include "ntp.h"
 #include <WiFi.h>
 
+// ================ ОБРАБОТЧИК СОБЫТИЙ WIFI ================
+// [FIX] Реконнект при обрыве связи: событийный драйвер вместо пассивного
+// опроса статуса. После DISCONNECTED ESP-IDF переводит STA в WL_IDLE_STATUS
+// и сам повторять подключения не будет (AutoReconnect отключён) — поэтому
+// через 3 сек после обрыва инициируем begin() принудительно, не дожидаясь
+// 60-секундного retry-цикла в wifiManage().
+static void onWifiEvent(WiFiEvent_t event) {
+  static uint32_t tDisc = 0;   // время последнего обрыва (только Core 0)
+  switch(event) {
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      // Обрыв: помечаем потерю (wifiManage поднимет AP через 15 сек).
+      // prevSta/tLost/logEv обрабатываются в контексте Core 0 (webTask),
+      // конфликтов с loop() (Core 1) нет — эти переменные там не используются.
+      if(prevSta) {
+        tLost = millis();
+        logEv(EV_WIFI_OFF, 0, "");
+        Serial.println("[WiFi] STA disconnected");
+      }
+      prevSta = false;
+      tDisc = millis();
+      break;
+    case ARDUINO_EVENT_WIFI_STA_LOST_IP:
+      // Провайдер пропал / IP потерялся — тоже считаем связь утраченной
+      if(WiFi.status() != WL_CONNECTED && tDisc == 0) tDisc = millis();
+      break;
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+    case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+      tDisc = 0;   // соединение восстановлено — сбрасываем счётчик reconnect
+      break;
+    default:
+      break;
+  }
+  // Принудительный reconnect через 3 сек после обрыва, если драйвер залёг
+  // в WL_IDLE_STATUS (повторных событий DISCONNECTED больше не приходит).
+  if(tDisc != 0 && WiFi.status() == WL_IDLE_STATUS
+     && millis() - tDisc >= 3000 && ssid[0] != '\0') {
+    bool apBusy = apOn && (WiFi.softAPgetStationNum() > 0);
+    if(!apBusy) {
+      Serial.println("[WiFi] Reconnect by event (begin)");
+      WiFi.begin(ssid, pass);
+    }
+    tDisc = millis();   // перезапускаем таймер на следующий цикл ожидания
+  }
+}
+
 // ================ ПЕРВИЧНАЯ ИНИЦИАЛИЗАЦИЯ ================
 void wifiInit() {
   Serial.println("[WiFi] Первичная инициализация...");
-  WiFi.setAutoReconnect(false);
+  WiFi.setAutoReconnect(false);   // реконнект управляется нашей логикой
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
+  // [FIX] Подписка на события WiFi: мгновенная реакция на обрыв связи
+  WiFi.onEvent(onWifiEvent);
   if(!dhcp) {
     WiFi.config(ip, gw, sn);
     Serial.printf("[WiFi] Статический IP: %s\n", ip.toString().c_str());

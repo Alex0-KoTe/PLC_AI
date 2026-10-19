@@ -5,7 +5,7 @@
 #define FACTORY   34
 //================ КОНСТАНТЫ РЕГУЛИРОВАНИЯ ================
 #define HYST      0.1f
-#define REL_MIN_ON_MS 60000UL  // [FIX] мин. время между переключениями одного клапана (антидребезг)
+#define REL_MIN_ON_MS 1000UL   // [FIX] мин. время между переключениями одного клапана (антидребезг)
 #define DEF_SP    10.0f
 #define DEF_DELTA 0.5f
 #define HOUR_MS   3600000UL
@@ -15,8 +15,8 @@
 //================ СЕТЬ ================
 // [FIX] Убран зашитый чужой WiFi-пароль: устройство подключается только
 // к сети, настроенной пользователем (веб/AP UsKoTE-AP -> /net).
-#define DEF_SSID  ""
-#define DEF_PASS  ""
+#define DEF_SSID  "KoTe"          // заводской WiFi по умолчанию
+#define DEF_PASS  "DYNFF39666"    // заводской пароль по умолчанию
 #define AP_SSID   "UsKoTE-AP"
 #define AP_PASS   "12345678"
 //================ MODBUS ================
